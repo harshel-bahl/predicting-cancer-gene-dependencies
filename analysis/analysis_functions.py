@@ -12,6 +12,63 @@ def CommonCols(df1, df2):
 def CommonIndexes(dataframes):
     return reduce(lambda x, y: x.intersection(y.index), dataframes[1:], dataframes[0].index)
 
+def Check_DF_Similarity(dfs, check='both'):
+    
+    if not dfs or not all(isinstance(df, pd.DataFrame) for df in dfs):
+        raise ValueError("Please provide a list of pandas DataFrames.")
+
+    if check not in ['columns', 'rows', 'both']:
+        raise ValueError("Check argument must be 'columns', 'rows', or 'both'")
+
+    def get_differences(sets):
+        common_elements = set.intersection(*sets)
+        return [list(common_elements.symmetric_difference(s)) for s in sets]
+
+    columns_sets = [set(df.columns) for df in dfs]
+    rows_sets = [set(df.index) for df in dfs]
+
+    if check == 'columns':
+        differences = get_differences(columns_sets)
+        all_match = all(len(diff) == 0 for diff in differences)
+        return {'all_match': all_match, 'column_differences': differences}
+
+    elif check == 'rows':
+        differences = get_differences(rows_sets)
+        all_match = all(len(diff) == 0 for diff in differences)
+        return {'all_match': all_match, 'row_differences': differences}
+
+    elif check == 'both':
+        col_diff = get_differences(columns_sets)
+        row_diff = get_differences(rows_sets)
+        all_match = all(len(diff) == 0 for diff in col_diff) and all(len(diff) == 0 for diff in row_diff)
+        return {'all_match': all_match, 'column_differences': col_diff, 'row_differences': row_diff}
+
+def Intersect_DF(dfs, match="both"):
+
+    if not dfs:
+        raise ValueError("The list of dataframes is empty")
+
+    common_index = dfs[0].index
+    common_columns = dfs[0].columns
+
+    for df in dfs[1:]:
+        if match in ("rows", "both"):
+            common_index = np.intersect1d(common_index, df.index)
+        if match in ("columns", "both"):
+            common_columns = np.intersect1d(common_columns, df.columns)
+
+    intersected_dfs = []
+    for df in dfs:
+        if match == "both":
+            df_intersected = df.loc[common_index, common_columns]
+        elif match == "rows":
+            df_intersected = df.loc[common_index]
+        elif match == "columns":
+            df_intersected = df[common_columns]
+        intersected_dfs.append(df_intersected)
+
+    return intersected_dfs
+
 def CombineDFsCol(dfs, column_name, new_column_names):
     
     result = dfs[0][[column_name]].copy()
