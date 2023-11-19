@@ -12,63 +12,6 @@ def CommonCols(df1, df2):
 def CommonIndexes(dataframes):
     return reduce(lambda x, y: x.intersection(y.index), dataframes[1:], dataframes[0].index)
 
-def Check_DF_Similarity(dfs, check='both'):
-    
-    if not dfs or not all(isinstance(df, pd.DataFrame) for df in dfs):
-        raise ValueError("Please provide a list of pandas DataFrames.")
-
-    if check not in ['columns', 'rows', 'both']:
-        raise ValueError("Check argument must be 'columns', 'rows', or 'both'")
-
-    def get_differences(sets):
-        common_elements = set.intersection(*sets)
-        return [list(common_elements.symmetric_difference(s)) for s in sets]
-
-    columns_sets = [set(df.columns) for df in dfs]
-    rows_sets = [set(df.index) for df in dfs]
-
-    if check == 'columns':
-        differences = get_differences(columns_sets)
-        all_match = all(len(diff) == 0 for diff in differences)
-        return {'all_match': all_match, 'column_differences': differences}
-
-    elif check == 'rows':
-        differences = get_differences(rows_sets)
-        all_match = all(len(diff) == 0 for diff in differences)
-        return {'all_match': all_match, 'row_differences': differences}
-
-    elif check == 'both':
-        col_diff = get_differences(columns_sets)
-        row_diff = get_differences(rows_sets)
-        all_match = all(len(diff) == 0 for diff in col_diff) and all(len(diff) == 0 for diff in row_diff)
-        return {'all_match': all_match, 'column_differences': col_diff, 'row_differences': row_diff}
-
-def Intersect_DF(dfs, match="both"):
-
-    if not dfs:
-        raise ValueError("The list of dataframes is empty")
-
-    common_index = dfs[0].index
-    common_columns = dfs[0].columns
-
-    for df in dfs[1:]:
-        if match in ("rows", "both"):
-            common_index = np.intersect1d(common_index, df.index)
-        if match in ("columns", "both"):
-            common_columns = np.intersect1d(common_columns, df.columns)
-
-    intersected_dfs = []
-    for df in dfs:
-        if match == "both":
-            df_intersected = df.loc[common_index, common_columns]
-        elif match == "rows":
-            df_intersected = df.loc[common_index]
-        elif match == "columns":
-            df_intersected = df[common_columns]
-        intersected_dfs.append(df_intersected)
-
-    return intersected_dfs
-
 def CombineDFsCol(dfs, column_name, new_column_names):
     
     result = dfs[0][[column_name]].copy()
@@ -80,7 +23,7 @@ def CombineDFsCol(dfs, column_name, new_column_names):
 
     return result
 
-def checkGenes(genesCheck, df):
+def CheckGenes(genesCheck, df):
 
     checkedGenes = {}
     for gene in genesCheck:
@@ -91,10 +34,11 @@ def checkGenes(genesCheck, df):
     
     return checkedGenes
 
-def z_score_normalize(df, axis=None):
+def ZScoreNormalise(df, axis=None):
+
     """Z-score normalize a DataFrame along the specified axis or the entire matrix."""
     
-    if axis is None:  # Normalize the entire matrix
+    if axis is None: 
         mean = df.values.mean()
         std = df.values.std()
         return (df - mean) / std
@@ -102,17 +46,18 @@ def z_score_normalize(df, axis=None):
     mean = df.mean(axis=axis)
     std = df.std(axis=axis)
     
-    if axis == 0:  # Normalize along columns
+    if axis == 0: 
         return (df - mean) / std
-    else:  # Normalize along rows
+    else:  
         return df.sub(mean, axis='index').div(std, axis='index')
 
-def min_max_scale_to_minus1_1(df):
+def MinMaxScale_Minus1_1(df):
+
     """Apply Min-Max scaling to a DataFrame to transform its values to the range [-1, 1]."""
-    X_min = df.min().min()  # Minimum value in the entire DataFrame
-    X_max = df.max().max()  # Maximum value in the entire DataFrame
+
+    X_min = df.min().min()  
+    X_max = df.max().max() 
     
-    # Check if there's no variance in the dataset
     if X_max == X_min:
         raise ValueError("Cannot apply scaling because max and min values are the same.")
     
@@ -120,16 +65,16 @@ def min_max_scale_to_minus1_1(df):
     return scaled_df
 
 
-def scale_normalize(df, axis=None):
+def ScaleNormalise(df, axis=None):
+
     """Z-score normalize and then scale the DataFrame along the specified axis or the entire matrix."""
-    normalized_df = z_score_normalize(df, axis)
-    scaled_df = min_max_scale_to_minus1_1(normalized_df)
+    
+    normalized_df = ZScoreNormalise(df, axis)
+    scaled_df = MinMaxScale_Minus1_1(normalized_df)
     return scaled_df
 
-def extract_gene_names(columns):
-    return [col.split(' ')[0] for col in columns]
-
 def TopUniqueGenes(dataframes, top_genes_no=100):
+
     sorted_essential_genes = pd.concat(dataframes).sort_values()
 
     top_genes_dict = {}

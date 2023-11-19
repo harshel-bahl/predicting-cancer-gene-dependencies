@@ -5,7 +5,7 @@ from keras import models
 from keras.layers import Dense, Concatenate
 from keras.callbacks import EarlyStopping
 import time
-import models.preprocess_data as pData
+
 
 if __name__ == "__main__":
 
