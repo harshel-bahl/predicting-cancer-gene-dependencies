@@ -252,7 +252,7 @@ def PredGeneRMSE(actual_df, predicted_df, genes=None):
 
     Returns:
     pd.DataFrame: A DataFrame containing the RMSE for each gene.
-    """
+    """ 
 
     if genes is None:
         if not actual_df.columns.equals(predicted_df.columns):

@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 
 def ExtractGenesNames(columns):
@@ -389,7 +389,7 @@ def GeneRelMiniPlot(rel1_X, rel1_Y, genes,
     plt.show()
 
 def PredGeneRMSE(actual_df, predicted_df, genes=None):
-    
+
     """
     Calculates the RMSE for predicted gene effect scores compared to actual gene effect scores
     across samples for each gene. If no genes are provided, checks that both DataFrames have the same columns.
@@ -417,3 +417,62 @@ def PredGeneRMSE(actual_df, predicted_df, genes=None):
         rmse_results[gene] = rmse
 
     return pd.DataFrame.from_dict(rmse_results, orient='index', columns=['RMSE'])
+
+def PredGeneMAE(actual_df, predicted_df, genes=None):
+    
+    """
+    Calculates the Mean Absolute Error (MAE) for predicted gene effect scores compared to actual gene effect scores
+    across samples for each gene. If no genes are provided, checks that both DataFrames have the same columns.
+
+    Args:
+    actual_df (pd.DataFrame): DataFrame with actual gene effect scores.
+    predicted_df (pd.DataFrame): DataFrame with predicted gene effect scores.
+    genes (list, optional): List of genes to calculate MAE for. If None, uses all genes in the DataFrame.
+
+    Returns:
+    pd.DataFrame: A DataFrame containing the MAE for each gene.
+    """
+
+    if genes is None:
+        if not actual_df.columns.equals(predicted_df.columns):
+            raise ValueError(
+                "The columns (genes) of the two DataFrames are not identical.")
+        genes = actual_df.columns
+
+    mae_results = {}
+
+    for gene in genes:
+        mae = mean_absolute_error(actual_df[gene], predicted_df[gene])
+        mae_results[gene] = mae
+
+    return pd.DataFrame.from_dict(mae_results, orient='index', columns=['MAE'])
+
+def PredGeneRSquared(actual_df, predicted_df, genes=None):
+
+    """
+    Calculates the R-squared for predicted gene effect scores compared to actual gene effect scores
+    across samples for each gene. If no genes are provided, checks that both DataFrames have the same columns.
+
+    Args:
+    actual_df (pd.DataFrame): DataFrame with actual gene effect scores.
+    predicted_df (pd.DataFrame): DataFrame with predicted gene effect scores.
+    genes (list, optional): List of genes to calculate R-squared for. If None, uses all genes in the DataFrame.
+
+    Returns:
+    pd.DataFrame: A DataFrame containing the R-squared for each gene.
+    """
+
+    if genes is None:
+        if not actual_df.columns.equals(predicted_df.columns):
+            raise ValueError(
+                "The columns (genes) of the two DataFrames are not identical.")
+        genes = actual_df.columns
+
+    r_squared_results = {}
+
+    for gene in genes:
+        r2 = r2_score(actual_df[gene], predicted_df[gene])
+        r_squared_results[gene] = r2
+
+    return pd.DataFrame.from_dict(r_squared_results, orient='index', columns=['R-Squared'])
+
