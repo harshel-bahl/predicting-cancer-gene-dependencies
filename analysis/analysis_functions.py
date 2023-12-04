@@ -13,13 +13,17 @@ def CommonIndexes(dataframes):
     return reduce(lambda x, y: x.intersection(y.index), dataframes[1:], dataframes[0].index)
 
 def CombineDFsCol(dfs, column_name, new_column_names):
-    
+
+    if len(dfs) != len(new_column_names):
+        raise ValueError("The number of dataframes and new column names must be the same.")
+
     result = dfs[0][[column_name]].copy()
-    
-    for df in dfs[1:]:
-        result = result.merge(df[[column_name]], left_index=True, right_index=True, how='inner')
-    
-    result.columns = new_column_names
+    result.columns = [new_column_names[0]]
+
+    for df, new_col_name in zip(dfs[1:], new_column_names[1:]):
+        df_renamed = df[[column_name]].copy()
+        df_renamed.columns = [new_col_name]
+        result = result.merge(df_renamed, left_index=True, right_index=True, how='inner')
 
     return result
 
@@ -68,7 +72,7 @@ def MinMaxScale_Minus1_1(df):
 def ScaleNormalise(df, axis=None):
 
     """Z-score normalize and then scale the DataFrame along the specified axis or the entire matrix."""
-    
+
     normalized_df = ZScoreNormalise(df, axis)
     scaled_df = MinMaxScale_Minus1_1(normalized_df)
     return scaled_df
@@ -222,3 +226,6 @@ def CreateDependencyPlot(
     plt.grid(True)
     plt.legend()
     plt.show()
+
+def ExtractGenesNames(columns):
+    return [col.split(' ')[0] for col in columns]
