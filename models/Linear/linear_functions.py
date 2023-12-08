@@ -3,9 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.linear_model import LinearRegression
+import statsmodels.api as sm
+import scipy.stats as stats
+import itertools
 
 
-def Check_DF_Similarity(dfs, check='both'):
+def check_df_similarity(dfs, check='both'):
 
     if not dfs or not all(isinstance(df, pd.DataFrame) for df in dfs):
         raise ValueError("Please provide a list of pandas DataFrames.")
@@ -38,7 +41,7 @@ def Check_DF_Similarity(dfs, check='both'):
         return {'all_match': all_match, 'column_differences': col_diff, 'row_differences': row_diff}
 
 
-def Intersect_DF(dfs, match="both"):
+def intersect_df(dfs, match="both"):
 
     if not dfs:
         raise ValueError("The list of dataframes is empty")
@@ -65,23 +68,378 @@ def Intersect_DF(dfs, match="both"):
     return intersected_dfs
 
 
-def ExtractGenesNames(columns):
+def extract_gene_names(columns):
     return [col.split(' ')[0] for col in columns]
 
 
-def LinePlot(df, 
-             line_colors, 
-             plot_size=(15, 8), 
-             point_size=5, 
-             point_alpha=0.7, 
-             axes_labels=None, 
-             axes_labels_fontsize=10, 
-             main_title=None, 
-             main_title_fontsize=14, 
-             legend_titles=None, 
-             xticks_rot=90, 
-             xticks_fontsize=6.5):
+def select_features(X_train, Y_train_col, quartiles=10, top_n=20, alpha=0.05):
+
+    X_medians = X_train.median()
+    Y_quantiles = pd.qcut(Y_train_col, quartiles, labels=False)
+
+    X_binary = X_train.gt(X_medians, axis='columns')
+
+    pearson_results = {}
+    spearman_results = {}
+    chi2_results = {}
+
+    for feature in X_train.columns:
+        feature_data = X_train[feature]
+
+        if np.std(feature_data) == 0 or np.std(Y_train_col) == 0:
+            continue
+
+        pearson_corr, pearson_p = stats.pearsonr(feature_data, Y_train_col)
+        spearman_corr, spearman_p = stats.spearmanr(feature_data, Y_train_col)
+
+        if pearson_p < alpha:
+            pearson_results[feature] = (abs(pearson_corr), pearson_p)
+        if spearman_p < alpha:
+            spearman_results[feature] = (abs(spearman_corr), spearman_p)
+
+        contingency_table = pd.crosstab(X_binary[feature], Y_quantiles)
+        chi2, p = stats.chi2_contingency(contingency_table)[:2]
+
+        if p < alpha:
+            chi2_results[feature] = (chi2, p)
+
+    selected_features = set()
+    for result_set in [pearson_results, spearman_results, chi2_results]:
+        for feature, _ in sorted(result_set.items(), key=lambda x: x[1][0], reverse=True)[:top_n]:
+            selected_features.add(feature)
+
+    return list(selected_features)
+
+
+def train_mLinear_model(X_train, Y_train, features, add_constant=True):
+
+    X = X_train[features]
+
+    model = sm.OLS(Y_train, sm.add_constant(
+        X) if add_constant == True else X).fit()
+
+    return model
+
+
+def predict_mLinear_model(X_test, Y_test, model, features, add_constant=True):
+
+    X = X_test[features]
+
+    Y_pred = model.predict(sm.add_constant(X) if add_constant == True else X)
+
+    pearsonCorr = calc_pearson_corr(Y_test, Y_pred)
+    RMSE = calc_RMSE(Y_test, Y_pred)
+    MAE = calc_MAE(Y_test, Y_pred)
+    RSquared = calc_RSquared(Y_test, Y_pred)
+
+    return Y_test, Y_pred, pearsonCorr, RMSE, MAE, RSquared
+
+def calc_pearson_corr(actual, predicted, columns=None):
+
+    if isinstance(actual, pd.DataFrame) and isinstance(predicted, pd.DataFrame):
+        if columns is None:
+            if not actual.columns.equals(predicted.columns):
+                raise ValueError("The columns of the two DataFrames are not identical.")
+            columns = actual.columns
+
+        correlation_results = {}
+        for column in columns:
+            corr, p_value = stats.pearsonr(actual[column], predicted[column])
+            correlation_results[column] = {'corr': corr, 'p-value': p_value}
+
+        return pd.DataFrame.from_dict(correlation_results, orient='index')
+
+    elif isinstance(actual, pd.Series) and isinstance(predicted, pd.Series):
+        if actual.index.equals(predicted.index):
+            corr, p_value = stats.pearsonr(actual, predicted)
+            return {'corr': corr, 'p-value': p_value}
+        else:
+            raise ValueError("The indices of the two Series are not identical.")
+
+    else:
+        raise TypeError("Inputs must both be pandas DataFrames or pandas Series.")
+
+
+def calc_RMSE(actual, predicted, columns=None):
+
+    if isinstance(actual, pd.DataFrame) and isinstance(predicted, pd.DataFrame):
+        if columns is None:
+            if not actual.columns.equals(predicted.columns):
+                raise ValueError(
+                    "The columns of the two DataFrames are not identical.")
+            columns = actual.columns
+
+        rmse_results = {}
+        for column in columns:
+            mse = mean_squared_error(actual[column], predicted[column])
+            rmse_results[column] = np.sqrt(mse)
+
+        return pd.DataFrame.from_dict(rmse_results, orient='index', columns=['RMSE'])
+
+    elif isinstance(actual, pd.Series) and isinstance(predicted, pd.Series):
+        if actual.index.equals(predicted.index):
+            return np.sqrt(mean_squared_error(actual, predicted))
+        else:
+            raise ValueError(
+                "The indices of the two Series are not identical.")
+
+    else:
+        raise TypeError(
+            "Inputs must both be pandas DataFrames or pandas Series.")
+
+
+def calc_MAE(actual, predicted, columns=None):
+
+    if isinstance(actual, pd.DataFrame) and isinstance(predicted, pd.DataFrame):
+        if columns is None:
+            if not actual.columns.equals(predicted.columns):
+                raise ValueError(
+                    "The columns of the two DataFrames are not identical.")
+            columns = actual.columns
+
+        mae_results = {}
+        for column in columns:
+            mae = mean_absolute_error(actual[column], predicted[column])
+            mae_results[column] = mae
+
+        return pd.DataFrame.from_dict(mae_results, orient='index', columns=['MAE'])
+
+    elif isinstance(actual, pd.Series) and isinstance(predicted, pd.Series):
+        if actual.index.equals(predicted.index):
+            return mean_absolute_error(actual, predicted)
+        else:
+            raise ValueError(
+                "The indices of the two Series are not identical.")
+
+    else:
+        raise TypeError(
+            "Inputs must both be pandas DataFrames or pandas Series.")
+
+
+def calc_RSquared(actual, predicted, columns=None):
+
+    if isinstance(actual, pd.DataFrame) and isinstance(predicted, pd.DataFrame):
+        if columns is None:
+            if not actual.columns.equals(predicted.columns):
+                raise ValueError(
+                    "The columns of the two DataFrames are not identical.")
+            columns = actual.columns
+
+        r_squared_results = {}
+        for column in columns:
+            r2 = r2_score(actual[column], predicted[column])
+            r_squared_results[column] = r2
+
+        return pd.DataFrame.from_dict(r_squared_results, orient='index', columns=['R-Squared'])
+
+    elif isinstance(actual, pd.Series) and isinstance(predicted, pd.Series):
+        if actual.index.equals(predicted.index):
+            return r2_score(actual, predicted)
+        else:
+            raise ValueError(
+                "The indices of the two Series are not identical.")
+
+    else:
+        raise TypeError(
+            "Inputs must both be pandas DataFrames or pandas Series.")
+
+
+def predictions_miniplot(Y_act1, Y_pred1, genes,
+                         Y_act2=None, 
+                         Y_pred2=None,
+                         num_cols=6,
+                         subplot_size=(2.25, 2.25),
+                         point_size=5,
+                         alpha_dict=None,
+                         main_title=None,
+                         main_title_fontsize=16,
+                         axes_labels=None,
+                         axis_label_fontsize=10,
+                         axis_tick_fontsize=10,
+                         legend_titles=None,
+                         sizeProps=[None, None, None, None],
+                         wspace=None,
+                         hspace=None,
+                         equal_axes_scale=False,
+                         line_width=1):
+
+    num_genes = len(genes)
+    num_rows = (num_genes + num_cols - 1) // num_cols
+
+    if equal_axes_scale:
+        all_values = np.concatenate([Y_act1.values.flatten(), Y_pred1.values.flatten(), 
+                                    Y_act2.values.flatten() if Y_act2 is not None else [], 
+                                    Y_pred2.values.flatten() if Y_pred2 is not None else []])
+        global_min, global_max = all_values.min(), all_values.max()
+
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(
+        subplot_size[0] * num_cols, subplot_size[1] * num_rows))
+
+    plt.subplots_adjust(top=sizeProps[0] if sizeProps[0] is not None else None,
+                        bottom=sizeProps[1] if sizeProps[1] is not None else None,
+                        right=sizeProps[2] if sizeProps[2] is not None else None,
+                        left=sizeProps[3] if sizeProps[3] is not None else None,
+                        wspace=wspace,
+                        hspace=hspace)
+
+    if main_title is not None:
+        fig.suptitle(main_title, fontsize=main_title_fontsize)
+
+    axes = axes.flatten() if num_rows * num_cols > 1 else [axes]
+
+    for i, gene in enumerate(genes):
+        ax = axes[i]
+
+        alpha_rel1 = alpha_dict['rel1'] if alpha_dict and 'rel1' in alpha_dict else 1
+        alpha_rel2 = alpha_dict['rel2'] if alpha_dict and 'rel2' in alpha_dict else 1
+
+        ax.scatter(Y_act1[gene].values, Y_pred1[gene].values, alpha=alpha_rel1, s=point_size, label="rel1")
+        
+        if Y_act2 is not None and Y_pred2 is not None:
+            ax.scatter(Y_act2[gene].values, Y_pred2[gene].values, alpha=alpha_rel2, s=point_size, label="rel2")
+
+        min_val = min(Y_act1[gene].values.min(), Y_act2[gene].values.min()) if Y_act2 is not None else Y_act1[gene].values.min()
+        max_val = max(Y_act1[gene].values.max(), Y_act2[gene].values.max()) if Y_act2 is not None else Y_act1[gene].values.max()
+        ax.plot([min_val, max_val], [min_val, max_val], 'k--', linewidth=line_width)
+
+        ax.set_title(gene)
+        ax.grid(True)
+
+        if equal_axes_scale:
+            ax.set_xlim(global_min, global_max)
+            ax.set_ylim(global_min, global_max)
+
+        if axes_labels is not None and i == 0:
+            ax.set_xlabel(axes_labels[0], fontsize=axis_label_fontsize)
+            ax.set_ylabel(axes_labels[1], fontsize=axis_label_fontsize)
+
+        ax.tick_params(axis='both', which='major', labelsize=axis_tick_fontsize)
+
+    for j in range(i + 1, num_rows * num_cols):
+        axes[j].set_visible(False)
+
+    if legend_titles is not None:
+        handles, labels = axes[0].get_legend_handles_labels()
+        updated_labels = [legend_titles.get(label, label) for label in labels]
+        fig.legend(handles, updated_labels, loc='lower right')
+
+    plt.show()
+
+
+def bar_chart_multi_col(df,
+                        columns_to_plot,
+                        plot_size=(15, 8),
+                        bar_width=0.75, 
+                        space_between_groups=0.1,
+                        left_space=1.5,
+                        right_space=1.5,
+                        axes_labels=None,
+                        axes_labels_fontsize=10,
+                        main_title=None,
+                        main_title_fontsize=14,
+                        xticks_rot=90,
+                        xticks_fontsize=6.5):
+
+    fig, ax = plt.subplots(figsize=plot_size)
+    n_cols = len(columns_to_plot)
+    indices = np.arange(len(df)) * (bar_width * n_cols + space_between_groups)
+
+    for i, column in enumerate(columns_to_plot):
+        ax.bar(indices + i * bar_width, df[column], bar_width, label=column)
+
+    ax.set_xlabel(axes_labels[0], fontsize=axes_labels_fontsize) if axes_labels else None
+    ax.set_ylabel(axes_labels[1], fontsize=axes_labels_fontsize) if axes_labels else None
+    ax.set_title(main_title, fontsize=main_title_fontsize) if main_title else None
+    ax.set_xticks(indices + bar_width * (n_cols - 1) / 2)
+    ax.set_xticklabels(df.index, rotation=xticks_rot, fontsize=xticks_fontsize)
+    ax.legend()
+    ax.grid()
+
+    left_limit = indices[0] - left_space
+    right_limit = indices[-1] + bar_width * n_cols + right_space
+    ax.set_xlim(left_limit, right_limit)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def bar_chart_sing_col(df, column,
+                       special_colors=None, 
+                       default_color='grey',  
+                       legend_labels=None,
+                       plot_size=(15, 8),
+                       bar_width=0.4,
+                       left_space=1.5,  
+                       right_space=1.5, 
+                       axes_labels=None,
+                       axes_labels_fontsize=10,
+                       main_title=None,
+                       main_title_fontsize=14,
+                       xticks_rot=90,
+                       xticks_fontsize=6.5):
+
+    fig, ax = plt.subplots(figsize=plot_size)
+    indices = np.arange(len(df))
+
+    for i, index in enumerate(df.index):
+        color = special_colors.get(index, default_color) if special_colors else default_color
+        ax.bar(indices[i], df.loc[index, column], bar_width, color=color)
+
+    ax.set_xlabel(axes_labels[0], fontsize=axes_labels_fontsize) if axes_labels else None
+    ax.set_ylabel(axes_labels[1], fontsize=axes_labels_fontsize) if axes_labels else None
+    ax.set_title(main_title, fontsize=main_title_fontsize) if main_title else None
+    ax.set_xticks(indices)
+    ax.set_xticklabels(df.index, rotation=xticks_rot, fontsize=xticks_fontsize)
+
+    if legend_labels:
+        handles = [plt.Rectangle((0,0),1,1, color=color) for color in legend_labels.values()]
+        labels = legend_labels.keys()
+        ax.legend(handles, labels)
+
+    ax.grid()
+
+    left_limit = indices[0] - left_space
+    right_limit = indices[-1] + bar_width + right_space
+    ax.set_xlim(left_limit, right_limit)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def calc_corr_freq(df, column_name):
     
+    intervals = np.linspace(0, 1, 11)
+    interval_labels = [f"{intervals[i]:.1f}-{intervals[i+1]:.1f}" for i in range(10)]
+
+    frequency = {label: 0 for label in interval_labels}
+
+    for value in df[column_name]:
+        for i in range(10):
+            if intervals[i] <= value < intervals[i+1]:
+                interval_key = interval_labels[i]
+                frequency[interval_key] += 1
+                break
+
+    frequency_table = pd.DataFrame(list(frequency.items()), columns=['Deciles', 'Frequency'])
+    
+    return frequency_table
+
+
+
+
+
+def line_plot(df,
+              line_colors,
+              plot_size=(15, 8),
+              point_size=5,
+              point_alpha=0.7,
+              axes_labels=None,
+              axes_labels_fontsize=10,
+              main_title=None,
+              main_title_fontsize=14,
+              legend_titles=None,
+              xticks_rot=90,
+              xticks_fontsize=6.5):
     """
     Plots each column of the dataframe as a line on a graph.
 
@@ -104,7 +462,8 @@ def LinePlot(df,
 
     for column in df.columns:
         color = line_colors.get(column, 'blue')
-        ax.plot(df.index, df[column], label=legend_titles.get(column, column) if legend_titles else column, marker='o', markersize=point_size, alpha=point_alpha, color=color)
+        ax.plot(df.index, df[column], label=legend_titles.get(
+            column, column) if legend_titles else column, marker='o', markersize=point_size, alpha=point_alpha, color=color)
 
     if axes_labels:
         ax.set_xlabel(axes_labels[0], fontsize=axes_labels_fontsize)
@@ -123,6 +482,8 @@ def LinePlot(df,
     plt.subplots_adjust(top=0.9)
     plt.show()
 
+
+
 def GeneRelMiniPlot(rel1_X, rel1_Y, genes,
                     rel2_X=None,
                     rel2_Y=None,
@@ -140,7 +501,6 @@ def GeneRelMiniPlot(rel1_X, rel1_Y, genes,
                     sizeProps=[None, None, None, None],
                     wspace=None,
                     hspace=None):
-    
     """
     Creates scatter plots for each gene to show the relationship between
     gene expression levels and gene effect scores, with subplot size customization,
@@ -161,13 +521,14 @@ def GeneRelMiniPlot(rel1_X, rel1_Y, genes,
     num_genes = len(genes)
     num_rows = (num_genes + num_cols - 1) // num_cols
 
-    fig, axes = plt.subplots(num_rows, num_cols, figsize=(subplot_size[0] * num_cols, subplot_size[1] * num_rows))
-    
-    plt.subplots_adjust(top= sizeProps[0] if sizeProps[0] is not None else None, 
-                        bottom= sizeProps[1] if sizeProps[1] is not None else None, 
-                        right= sizeProps[2] if sizeProps[2] is not None else None,
-                        left= sizeProps[3] if sizeProps[3] is not None else None,
-                        wspace=wspace, 
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(
+        subplot_size[0] * num_cols, subplot_size[1] * num_rows))
+
+    plt.subplots_adjust(top=sizeProps[0] if sizeProps[0] is not None else None,
+                        bottom=sizeProps[1] if sizeProps[1] is not None else None,
+                        right=sizeProps[2] if sizeProps[2] is not None else None,
+                        left=sizeProps[3] if sizeProps[3] is not None else None,
+                        wspace=wspace,
                         hspace=hspace)
 
     if main_title != None:
@@ -200,7 +561,8 @@ def GeneRelMiniPlot(rel1_X, rel1_Y, genes,
             ax.set_xlabel(axes_labels[0], fontsize=axis_label_fontsize)
             ax.set_ylabel(axes_labels[1], fontsize=axis_label_fontsize)
 
-        ax.tick_params(axis='both', which='major', labelsize=axis_tick_fontsize)
+        ax.tick_params(axis='both', which='major',
+                       labelsize=axis_tick_fontsize)
 
     for j in range(i + 1, num_rows * num_cols):
         axes[j].set_visible(False)
@@ -214,7 +576,6 @@ def GeneRelMiniPlot(rel1_X, rel1_Y, genes,
 
 
 def GeneLinearity(df1, df2, genes):
-
     """
     Computes the linearity (Pearson correlation) for each gene in the given list
     of genes, based on the data from two dataframes.
@@ -238,94 +599,6 @@ def GeneLinearity(df1, df2, genes):
             linearity_results[gene] = None
 
     return pd.DataFrame.from_dict(linearity_results, orient='index', columns=['corr'])
-
-
-def PredGeneRMSE(actual_df, predicted_df, genes=None):
-    """
-    Calculates the RMSE for predicted gene effect scores compared to actual gene effect scores
-    across samples for each gene. If no genes are provided, checks that both DataFrames have the same columns.
-
-    Args:
-    actual_df (pd.DataFrame): DataFrame with actual gene effect scores.
-    predicted_df (pd.DataFrame): DataFrame with predicted gene effect scores.
-    genes (list, optional): List of genes to calculate RMSE for. If None, uses all genes in the DataFrame.
-
-    Returns:
-    pd.DataFrame: A DataFrame containing the RMSE for each gene.
-    """ 
-
-    if genes is None:
-        if not actual_df.columns.equals(predicted_df.columns):
-            raise ValueError(
-                "The columns (genes) of the two DataFrames are not identical.")
-        genes = actual_df.columns
-
-    rmse_results = {}
-
-    for gene in genes:
-        mse = mean_squared_error(actual_df[gene], predicted_df[gene])
-        rmse = np.sqrt(mse)
-        rmse_results[gene] = rmse
-
-    return pd.DataFrame.from_dict(rmse_results, orient='index', columns=['RMSE'])
-
-def PredGeneMAE(actual_df, predicted_df, genes=None):
-    
-    """
-    Calculates the Mean Absolute Error (MAE) for predicted gene effect scores compared to actual gene effect scores
-    across samples for each gene. If no genes are provided, checks that both DataFrames have the same columns.
-
-    Args:
-    actual_df (pd.DataFrame): DataFrame with actual gene effect scores.
-    predicted_df (pd.DataFrame): DataFrame with predicted gene effect scores.
-    genes (list, optional): List of genes to calculate MAE for. If None, uses all genes in the DataFrame.
-
-    Returns:
-    pd.DataFrame: A DataFrame containing the MAE for each gene.
-    """
-
-    if genes is None:
-        if not actual_df.columns.equals(predicted_df.columns):
-            raise ValueError(
-                "The columns (genes) of the two DataFrames are not identical.")
-        genes = actual_df.columns
-
-    mae_results = {}
-
-    for gene in genes:
-        mae = mean_absolute_error(actual_df[gene], predicted_df[gene])
-        mae_results[gene] = mae
-
-    return pd.DataFrame.from_dict(mae_results, orient='index', columns=['MAE'])
-
-def PredGeneRSquared(actual_df, predicted_df, genes=None):
-
-    """
-    Calculates the R-squared for predicted gene effect scores compared to actual gene effect scores
-    across samples for each gene. If no genes are provided, checks that both DataFrames have the same columns.
-
-    Args:
-    actual_df (pd.DataFrame): DataFrame with actual gene effect scores.
-    predicted_df (pd.DataFrame): DataFrame with predicted gene effect scores.
-    genes (list, optional): List of genes to calculate R-squared for. If None, uses all genes in the DataFrame.
-
-    Returns:
-    pd.DataFrame: A DataFrame containing the R-squared for each gene.
-    """
-
-    if genes is None:
-        if not actual_df.columns.equals(predicted_df.columns):
-            raise ValueError(
-                "The columns (genes) of the two DataFrames are not identical.")
-        genes = actual_df.columns
-
-    r_squared_results = {}
-
-    for gene in genes:
-        r2 = r2_score(actual_df[gene], predicted_df[gene])
-        r_squared_results[gene] = r2
-
-    return pd.DataFrame.from_dict(r_squared_results, orient='index', columns=['R-Squared'])
 
 
 def ComputeGeneLinearModels(df1, df2, GOI=None):
